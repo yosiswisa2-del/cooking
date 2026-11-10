@@ -1,10 +1,10 @@
 // שומר את האפליקציה בטלפון כדי שתעבוד גם בלי אינטרנט.
 // כשמשנים קבצים, מעלים את המספר בשורה הבאה (rb-v6, rb-v6...) כדי שהטלפון יטען את הגרסה החדשה.
-const C = 'rb-v6';
+const C = 'rb-v9';
 const FILES = ['./', 'index.html', 'seed.json', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(C).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(C).then(c => Promise.all(FILES.map(f=>fetch(f,{cache:'reload'}).then(r=>r.ok?c.put(f,r):0)))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
@@ -39,17 +39,14 @@ self.addEventListener('fetch', e => {
   }
   if (e.request.method !== 'GET') return;
   e.respondWith(
-    caches.match(e.request, { ignoreSearch: true }).then(hit =>
-      hit ||
-      fetch(e.request)
-        .then(res => {
-          if (new URL(e.request.url).origin === location.origin) {
-            const copy = res.clone();
-            caches.open(C).then(c => c.put(e.request, copy));
-          }
-          return res;
-        })
-        .catch(() => caches.match('index.html'))
-    )
+    fetch(e.request, { cache: 'no-cache' })
+      .then(res => {
+        if (res.ok && new URL(e.request.url).origin === location.origin) {
+          const copy = res.clone();
+          caches.open(C).then(c => c.put(e.request, copy));
+        }
+        return res;
+      })
+      .catch(() => caches.match(e.request, { ignoreSearch: true }).then(h => h || caches.match('index.html')))
   );
 });
