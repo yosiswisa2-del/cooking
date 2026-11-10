@@ -1,7 +1,7 @@
 // שומר את האפליקציה בטלפון כדי שתעבוד גם בלי אינטרנט.
-// כשמשנים קבצים, מעלים את המספר בשורה הבאה (rb-v2, rb-v3...) כדי שהטלפון יטען את הגרסה החדשה.
-const C = 'rb-v3';
-const FILES = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
+// כשמשנים קבצים, מעלים את המספר בשורה הבאה (rb-v6, rb-v6...) כדי שהטלפון יטען את הגרסה החדשה.
+const C = 'rb-v6';
+const FILES = ['./', 'index.html', 'seed.json', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(C).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
@@ -10,15 +10,36 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== C).map(k => caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(k => k !== C && k !== 'rb-share').map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
 
+// קבלת קבצים משיתוף (למשל מ-Samsung Notes): שומרים אותם זמנית ופותחים את האפליקציה
 self.addEventListener('fetch', e => {
+  const u = new URL(e.request.url);
+  if (e.request.method === 'POST' && u.pathname.endsWith('/share-target')) {
+    e.respondWith((async () => {
+      try {
+        const fd = await e.request.formData();
+        const c = await caches.open('rb-share');
+        let n = 0;
+        for (const f of fd.getAll('files')) {
+          if (!f || !f.size) continue;
+          await c.put('/shared/' + Date.now() + '-' + n++, new Response(f, {
+            headers: { 'content-type': f.type || 'application/octet-stream', 'x-name': encodeURIComponent(f.name || 'shared'), 'x-mod': String(f.lastModified || 0) }
+          }));
+        }
+        const t = [fd.get('title'), fd.get('text')].filter(Boolean).join('\n');
+        if (t) await c.put('/shared/' + Date.now() + '-t', new Response(t, { headers: { 'content-type': 'text/plain', 'x-name': encodeURIComponent('shared.txt'), 'x-mod': '0' } }));
+      } catch (err) {}
+      return Response.redirect('./?shared=1', 303);
+    })());
+    return;
+  }
   if (e.request.method !== 'GET') return;
   e.respondWith(
-    caches.match(e.request).then(hit =>
+    caches.match(e.request, { ignoreSearch: true }).then(hit =>
       hit ||
       fetch(e.request)
         .then(res => {
